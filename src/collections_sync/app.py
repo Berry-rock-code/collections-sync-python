@@ -1,5 +1,8 @@
 """FastAPI application for collections-sync service."""
+import json
 import logging
+import os
+import tempfile
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime
@@ -33,8 +36,33 @@ async def lifespan(app: FastAPI):
     )
     buildium_client = BuildiumClient(buildium_config)
 
+    # Handle Google Sheets credentials
+    creds_path = None
+    creds_json = os.getenv('GOOGLE_SHEETS_CREDS')
+    if creds_json:
+        try:
+            # Write credentials from secret to temp file
+            temp_file = tempfile.NamedTemporaryFile(
+                mode='w',
+                suffix='.json',
+                delete=False,
+                dir='/tmp'
+            )
+            temp_file.write(creds_json)
+            temp_file.close()
+            creds_path = temp_file.name
+            logger.info("Wrote Google Sheets credentials to %s", creds_path)
+        except Exception as e:
+            logger.warning("Failed to write credentials file: %s", e)
+
     # Initialize Google Sheets client
     sheets_config = GoogleSheetsConfig()
+    if creds_path:
+        sheets_config.credentials_path = creds_path
+        logger.info("Set credentials_path to %s", creds_path)
+    logger.info("GoogleSheetsConfig credentials_path: %s", sheets_config.credentials_path)
+    if sheets_config.credentials_path:
+        logger.info("Credentials file exists: %s", os.path.exists(sheets_config.credentials_path))
     sheets_client = GoogleSheetsClient(sheets_config)
 
     # Store in app state

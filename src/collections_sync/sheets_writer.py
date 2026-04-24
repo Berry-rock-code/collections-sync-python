@@ -127,7 +127,11 @@ class CollectionsSheetsWriter:
         sheet_headers, num_cols = self._read_sheet_headers()
 
         if not sheet_headers:
-            raise ValueError(f"header row {self.header_row} is empty")
+            logger.error(f"No headers found in sheet '{self.sheet_title}' at row {self.header_row}")
+            raise ValueError(
+                f"header row {self.header_row} is empty. "
+                f"Please ensure the sheet '{self.sheet_title}' has headers in row {self.header_row}"
+            )
 
         # Find key column
         key_idx = self._find_sheet_index(sheet_headers, self.key_header)
@@ -388,6 +392,7 @@ class CollectionsSheetsWriter:
         vals = self.client.read_range(self.spreadsheet_id, read_a1)
 
         if not vals or not vals[0]:
+            logger.error(f"Failed to read headers from {read_a1}. API returned: {vals}")
             return [], 0
 
         raw = vals[0]
@@ -401,9 +406,12 @@ class CollectionsSheetsWriter:
                 break
 
         if last < 0:
+            logger.error(f"No headers found in row {self.header_row}. Raw values: {raw}")
             return [], 0
 
-        return headers[: last + 1], last + 1
+        result = headers[: last + 1], last + 1
+        logger.info(f"Read {len(result[0])} headers from row {self.header_row}: {result[0][:5]}...")
+        return result
 
     def _find_sheet_index(self, sheet_headers: list[str], canonical: str) -> int:
         """Find column index in sheet headers using aliases.

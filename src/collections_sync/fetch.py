@@ -54,11 +54,7 @@ async def fetch_active_owed_rows(
     # Step B: Fetch all leases
     logger.info("Fetching leases...")
     leases: list[Lease] = await asyncio.to_thread(
-        lambda: (
-            client.list_all_leases()
-            if max_pages == 0
-            else client.list_all_leases_limited(max_pages)
-        )
+        lambda: client.list_all_leases(max_pages=max_pages)
     )
     logger.info("Fetched %d total leases", len(leases))
 

@@ -1,0 +1,45 @@
+# Cloud Build configuration for collections-sync
+steps:
+  # Build the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/${PROJECT_ID}/collections-sync:${SHORT_SHA}'
+      - '-t'
+      - 'gcr.io/${PROJECT_ID}/collections-sync:latest'
+      - '-f'
+      - 'collections-sync/Dockerfile'
+      - '.'
+
+  # Push to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/${PROJECT_ID}/collections-sync:${SHORT_SHA}'
+
+  # Deploy to Cloud Run
+  - name: 'gcr.io/cloud-builders/gke-deploy'
+    args:
+      - run
+      - '--filename=collections-sync/k8s/'
+      - '--image=gcr.io/${PROJECT_ID}/collections-sync:${SHORT_SHA}'
+      - '--location=${_REGION}'
+
+# Alternative: Direct Cloud Run deployment (simpler)
+# - name: 'gcr.io/cloud-builders/run'
+#   args:
+#     - deploy
+#     - collections-sync
+#     - '--image=gcr.io/${PROJECT_ID}/collections-sync:${SHORT_SHA}'
+#     - '--region=${_REGION}'
+#     - '--platform=managed'
+
+images:
+  - 'gcr.io/${PROJECT_ID}/collections-sync:${SHORT_SHA}'
+  - 'gcr.io/${PROJECT_ID}/collections-sync:latest'
+
+substitutions:
+  _REGION: 'us-central1'
+
+timeout: '3600s'
