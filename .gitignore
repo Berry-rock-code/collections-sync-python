@@ -1,0 +1,75 @@
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+.env.*.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+credentials.json
+service_account.json
+secrets.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytype/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# Project-specific
+*.log
+logs/
+*.bak
+*.tmp
+.cache/
+
+# Google auth
+auth/
+/auth/
+**/auth/**
