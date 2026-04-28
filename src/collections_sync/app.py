@@ -2,13 +2,15 @@
 import json
 import logging
 import os
+import sys
 import tempfile
+import traceback
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from core_integrations.buildium import BuildiumClient, BuildiumConfig
 from core_integrations.google_sheets import GoogleSheetsClient, GoogleSheetsConfig
 
@@ -22,6 +24,56 @@ from .models import SyncMode, SyncRequest, SyncResult
 from .sheets_writer import CollectionsSheetsWriter
 
 logger = logging.getLogger(__name__)
+
+
+def _error_response(
+    error_type: str,
+    request_id: str,
+    message: str,
+    status_code: int,
+    debug: bool = False,
+    exception: Exception = None,
+    user_actions: list[str] = None,
+    technical_info: dict = None,
+) -> dict:
+    """Format error response based on debug mode.
+
+    Args:
+        error_type: Error type (e.g., "DataCorruptionError")
+        request_id: Request ID for tracing
+        message: Error message
+        status_code: HTTP status code
+        debug: If True, include full technical details and stack trace
+        exception: The original exception (for stack trace)
+        user_actions: List of actions for non-technical users
+        technical_info: Dict of technical details
+
+    Returns:
+        Error detail dict for HTTPException
+    """
+    if debug:
+        # Full technical response
+        response = {
+            "error_type": error_type,
+            "request_id": request_id,
+            "http_status": status_code,
+            "message": message,
+            "exception_type": type(exception).__name__ if exception else None,
+            "stack_trace": traceback.format_exc() if exception else None,
+            "technical_info": technical_info or {},
+        }
+    else:
+        # User-friendly response
+        response = {
+            "error_type": error_type,
+            "request_id": request_id,
+            "message": message,
+            "actions": user_actions or ["Contact support with request_id"],
+        }
+        if technical_info:
+            response["technical_info"] = technical_info
+
+    return response
 
 
 @asynccontextmanager
@@ -102,21 +154,26 @@ async def health() -> dict:
 
 
 @app.post("/")
-async def trigger_sync(request: SyncRequest) -> dict:
+async def trigger_sync(request: SyncRequest, debug: bool = Query(False)) -> dict:
     """Trigger synchronization.
 
     Args:
         request: SyncRequest with mode, max_pages, max_rows.
+        debug: If True, return full technical error details with stack traces.
 
     Returns:
         SyncResult as JSON with request_id for tracing.
+
+    Usage:
+        POST / ?mode=bulk               → User-friendly errors
+        POST / ?mode=bulk&debug=true    → Full technical errors with stack traces
     """
     cfg = app.state.cfg
     buildium = app.state.buildium
     sheets = app.state.sheets
 
     request_id = str(uuid.uuid4())
-    logger.info("Sync requested request_id=%s mode=%s", request_id, request.mode)
+    logger.info("Sync requested request_id=%s mode=%s debug=%s", request_id, request.mode, debug)
 
     try:
         if request.mode == SyncMode.BULK:
@@ -131,23 +188,54 @@ async def trigger_sync(request: SyncRequest) -> dict:
         logger.warning("Lock timeout request_id=%s: %s", request_id, e)
         raise HTTPException(
             status_code=503,
-            detail={
-                "error_type": "LockTimeoutError",
-                "request_id": request_id,
-                "message": str(e),
-                "suggestion": "Another sync is in progress. Retry in 30 seconds.",
-            },
+            detail=_error_response(
+                error_type="LockTimeoutError",
+                request_id=request_id,
+                message=str(e),
+                status_code=503,
+                debug=debug,
+                exception=e,
+                user_actions=[
+                    "1. Wait 30-60 seconds and retry",
+                    "2. If persistent, contact support with request_id",
+                ],
+                technical_info={
+                    "reason": "Another sync is currently in progress (lock held for > 30 seconds)",
+                    "lock_sheet": cfg.sync_lock_sheet,
+                    "lock_timeout_seconds": cfg.sync_lock_timeout_seconds,
+                    "lock_stale_seconds": cfg.sync_lock_stale_seconds,
+                    "spreadsheet_id": cfg.effective_sheet_id,
+                },
+            ),
         )
     except DataValidationError as e:
         logger.error("Data validation error request_id=%s: %s", request_id, e)
         raise HTTPException(
             status_code=422,
-            detail={
-                "error_type": "DataValidationError",
-                "request_id": request_id,
-                "message": str(e),
-                "suggestion": "Check source data quality in Buildium.",
-            },
+            detail=_error_response(
+                error_type="DataValidationError",
+                request_id=request_id,
+                message=str(e),
+                status_code=422,
+                debug=debug,
+                exception=e,
+                user_actions=[
+                    "1. Some rows from Buildium have data quality issues",
+                    "2. Invalid rows are automatically filtered out",
+                    "3. Contact DevOps if this happens frequently",
+                ],
+                technical_info={
+                    "reason": "Some rows failed validation (negative amounts, invalid dates, etc.)",
+                    "validation_error_details": str(e),
+                    "note": "Invalid rows are filtered out. Sync continues with valid data only.",
+                    "common_issues": [
+                        "lease_id <= 0",
+                        "amount_owed < 0",
+                        "empty name field",
+                        "date_added not matching MM/DD/YYYY",
+                    ],
+                },
+            ),
         )
     except DataCorruptionError as e:
         logger.error(
@@ -156,24 +244,77 @@ async def trigger_sync(request: SyncRequest) -> dict:
             e,
             exc_info=True,
         )
+        sheet_url = f"https://docs.google.com/spreadsheets/d/{cfg.effective_sheet_id}/edit"
         raise HTTPException(
             status_code=500,
-            detail={
-                "error_type": "DataCorruptionError",
-                "request_id": request_id,
-                "message": str(e),
-                "suggestion": "Verify the sheet manually. The last sync may have partially written.",
-            },
+            detail=_error_response(
+                error_type="DataCorruptionError",
+                request_id=request_id,
+                message=str(e),
+                status_code=500,
+                debug=debug,
+                exception=e,
+                user_actions=[
+                    f"1. Open sheet: {sheet_url}",
+                    f"2. Check tab '{cfg.worksheet_name}' for incomplete rows",
+                    "3. Look for rows with missing data in any columns",
+                    "4. Save a backup (File → Version history)",
+                    "5. Manually fix incomplete rows",
+                    f"6. Contact support with request_id={request_id}",
+                ],
+                technical_info={
+                    "sheet_id": cfg.effective_sheet_id,
+                    "worksheet": cfg.worksheet_name,
+                    "error_message": str(e),
+                    "cause": "Post-write checksum verification failed - expected != actual",
+                    "severity": "CRITICAL - requires manual intervention",
+                    "what_happened": [
+                        "1. Rows were written to Google Sheets",
+                        "2. Service read back the written data",
+                        "3. Checksum comparison failed (data was corrupted or modified)",
+                        "4. Sheet may be partially written or have incorrect values",
+                    ],
+                    "notes": [
+                        "NO RETRY performed (sheet state unknown)",
+                        "Manual inspection required before retry",
+                        "Check Google Sheets Activity log for any concurrent writes",
+                        "Verify Buildium API and Google Sheets quota are healthy",
+                    ],
+                    "docs": "See docs/ROBUSTNESS_FEATURES.md#step-9-verify-post-write-state",
+                },
+            ),
         )
     except Exception as e:
         logger.error("Unexpected error request_id=%s: %s", request_id, e, exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail={
-                "error_type": "InternalError",
-                "request_id": request_id,
-                "message": str(e),
-            },
+            detail=_error_response(
+                error_type="InternalError",
+                request_id=request_id,
+                message=str(e),
+                status_code=500,
+                debug=debug,
+                exception=e,
+                user_actions=[
+                    f"1. Note this request_id: {request_id}",
+                    "2. Check if Buildium or Google Sheets are down",
+                    "3. Try again in 30 seconds",
+                    "4. If problem persists, contact DevOps",
+                ],
+                technical_info={
+                    "exception_type": type(e).__name__,
+                    "error_message": str(e),
+                    "spreadsheet_id": cfg.effective_sheet_id,
+                    "worksheet": cfg.worksheet_name,
+                    "troubleshooting": [
+                        "1. Check Buildium API status",
+                        "2. Check Google Sheets quota and rate limits",
+                        "3. Check service credentials (GCP IAM, API keys)",
+                        "4. Review timeout settings (BAL_TIMEOUT, LEASE_TIMEOUT, TENANT_TIMEOUT)",
+                        "5. Check network connectivity to both APIs",
+                    ],
+                },
+            ),
         )
 
 
