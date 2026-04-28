@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import tempfile
+import uuid
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime
@@ -11,8 +12,12 @@ from fastapi import FastAPI, HTTPException
 from core_integrations.buildium import BuildiumClient, BuildiumConfig
 from core_integrations.google_sheets import GoogleSheetsClient, GoogleSheetsConfig
 
+from .async_utils import run_sync_with_timeout
 from .config import CollectionsSyncConfig
+from .data_validator import DataValidator
+from .exceptions import DataCorruptionError, DataValidationError, LockTimeoutError
 from .fetch import fetch_active_owed_rows
+from .lock_manager import SyncLockManager
 from .models import SyncMode, SyncRequest, SyncResult
 from .sheets_writer import CollectionsSheetsWriter
 
@@ -104,20 +109,72 @@ async def trigger_sync(request: SyncRequest) -> dict:
         request: SyncRequest with mode, max_pages, max_rows.
 
     Returns:
-        SyncResult as JSON.
+        SyncResult as JSON with request_id for tracing.
     """
     cfg = app.state.cfg
     buildium = app.state.buildium
     sheets = app.state.sheets
 
+    request_id = str(uuid.uuid4())
+    logger.info("Sync requested request_id=%s mode=%s", request_id, request.mode)
+
     try:
         if request.mode == SyncMode.BULK:
-            return await _run_bulk(cfg, buildium, sheets, request)
+            result = await _run_bulk(cfg, buildium, sheets, request, request_id)
         else:
-            return await _run_quick(cfg, buildium, sheets, request)
+            result = await _run_quick(cfg, buildium, sheets, request, request_id)
+
+        result["request_id"] = request_id
+        return result
+
+    except LockTimeoutError as e:
+        logger.warning("Lock timeout request_id=%s: %s", request_id, e)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error_type": "LockTimeoutError",
+                "request_id": request_id,
+                "message": str(e),
+                "suggestion": "Another sync is in progress. Retry in 30 seconds.",
+            },
+        )
+    except DataValidationError as e:
+        logger.error("Data validation error request_id=%s: %s", request_id, e)
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_type": "DataValidationError",
+                "request_id": request_id,
+                "message": str(e),
+                "suggestion": "Check source data quality in Buildium.",
+            },
+        )
+    except DataCorruptionError as e:
+        logger.error(
+            "Data corruption detected request_id=%s: %s",
+            request_id,
+            e,
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error_type": "DataCorruptionError",
+                "request_id": request_id,
+                "message": str(e),
+                "suggestion": "Verify the sheet manually. The last sync may have partially written.",
+            },
+        )
     except Exception as e:
-        logger.error("Sync failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Unexpected error request_id=%s: %s", request_id, e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error_type": "InternalError",
+                "request_id": request_id,
+                "message": str(e),
+            },
+        )
 
 
 async def _run_bulk(
@@ -125,9 +182,15 @@ async def _run_bulk(
     buildium: BuildiumClient,
     sheets: GoogleSheetsClient,
     request: SyncRequest,
+    request_id: str,
 ) -> dict:
     """Execute bulk sync mode."""
-    logger.info("Starting bulk sync: max_pages=%d, max_rows=%d", request.max_pages, request.max_rows)
+    logger.info(
+        "Starting bulk sync request_id=%s: max_pages=%d, max_rows=%d",
+        request_id,
+        request.max_pages,
+        request.max_rows,
+    )
 
     writer = CollectionsSheetsWriter(
         client=sheets,
@@ -163,31 +226,61 @@ async def _run_bulk(
 
     if not rows:
         logger.info("No rows to sync")
-        return asdict(SyncResult(
-            mode=request.mode.value,
-            existing_keys=len(existing_lease_ids),
-            rows_prepared=0,
-            leases_scanned=leases_scanned,
-        ))
+        return asdict(
+            SyncResult(
+                mode=request.mode.value,
+                existing_keys=len(existing_lease_ids),
+                rows_prepared=0,
+                leases_scanned=leases_scanned,
+            )
+        )
 
     # Upsert to sheet
-    from .transform import HEADERS
-    rows_updated, rows_appended = writer.upsert_preserving(HEADERS, rows)
+    if cfg.sync_enable_atomic:
+        logger.info(
+            "Using atomic upsert with locking request_id=%s", request_id
+        )
+        lock_mgr = SyncLockManager(
+            client=sheets,
+            spreadsheet_id=cfg.effective_sheet_id,
+            lock_sheet=cfg.sync_lock_sheet,
+            acquire_timeout=float(cfg.sync_lock_timeout_seconds),
+            stale_timeout=float(cfg.sync_lock_stale_seconds),
+        )
+
+        validator = DataValidator()
+
+        rows_updated, rows_appended = writer.upsert_preserving_atomic(
+            new_rows=rows,
+            lock_manager=lock_mgr,
+            validator=validator,
+            verify_checksums=cfg.sync_verify_checksums,
+            max_retries=cfg.sync_max_retries,
+            retry_backoff_ms=cfg.sync_retry_backoff_ms,
+        )
+    else:
+        logger.info("Using legacy upsert (atomic disabled) request_id=%s", request_id)
+        from .transform import HEADERS
+
+        rows_updated, rows_appended = writer.upsert_preserving(HEADERS, rows)
 
     logger.info(
-        "Upsert complete: %d updated, %d appended",
+        "Upsert complete request_id=%s: %d updated, %d appended",
+        request_id,
         rows_updated,
         rows_appended,
     )
 
-    return asdict(SyncResult(
-        mode=request.mode.value,
-        existing_keys=len(existing_lease_ids),
-        rows_prepared=len(rows),
-        rows_updated=rows_updated,
-        rows_appended=rows_appended,
-        leases_scanned=leases_scanned,
-    ))
+    return asdict(
+        SyncResult(
+            mode=request.mode.value,
+            existing_keys=len(existing_lease_ids),
+            rows_prepared=len(rows),
+            rows_updated=rows_updated,
+            rows_appended=rows_appended,
+            leases_scanned=leases_scanned,
+        )
+    )
 
 
 async def _run_quick(
@@ -195,9 +288,10 @@ async def _run_quick(
     buildium: BuildiumClient,
     sheets: GoogleSheetsClient,
     request: SyncRequest,
+    request_id: str,
 ) -> dict:
     """Execute quick sync mode (balance-only updates)."""
-    logger.info("Starting quick sync")
+    logger.info("Starting quick sync request_id=%s", request_id)
 
     writer = CollectionsSheetsWriter(
         client=sheets,
@@ -250,8 +344,7 @@ async def _fetch_balances(client: BuildiumClient, lease_ids: list[int]) -> dict[
     Returns:
         Map of lease_id -> balance.
     """
-    def _do_fetch():
-        return client.fetch_outstanding_balances_for_lease_ids(lease_ids)
-
-    import asyncio
-    return await asyncio.to_thread(_do_fetch)
+    return await run_sync_with_timeout(
+        client.fetch_outstanding_balances_for_lease_ids,
+        lease_ids,
+    )
