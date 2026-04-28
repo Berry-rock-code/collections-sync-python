@@ -230,7 +230,7 @@ Both clients read from environment variables via pydantic-settings:
 |----------|----------|---------|---------|
 | `BUILDIUM_KEY` or `BUILDIUM_CLIENT_ID` | ✅ | — | BuildiumClient auth header |
 | `BUILDIUM_SECRET` or `BUILDIUM_CLIENT_SECRET` | ✅ | — | BuildiumClient auth header |
-| `BUILDIUM_BASE_URL` | ❌ | `https://api.buildium.com` | API endpoint |
+| `BUILDIUM_API_URL` or `BUILDIUM_BASE_URL` | ❌ | `https://api.buildium.com/v1` | API endpoint |
 | `BUILDIUM_PAGE_SIZE` | ❌ | `1000` | Pagination |
 | `BUILDIUM_CONNECT_TIMEOUT_SECONDS` | ❌ | `10` | Connection timeout |
 | `BUILDIUM_READ_TIMEOUT_SECONDS` | ❌ | `30` | Read timeout |
@@ -510,4 +510,3 @@ This test:
 - Yellow highlighting for new rows
 
 The separation of concerns allows **core-integrations** to be shared across multiple projects (address_pipeline, etc.) while **collections-sync** focuses on the specific business logic of delinquent tenant tracking.
-

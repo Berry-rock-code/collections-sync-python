@@ -1,6 +1,7 @@
 """Unit tests for fetch module (concurrent tenant enrichment)."""
 import pytest
 import asyncio
+import time
 from unittest.mock import Mock, AsyncMock, MagicMock
 
 from collections_sync.fetch import (
@@ -518,6 +519,61 @@ class TestFetchActiveOwedRows:
             client=mock_client,
             max_pages=0,
             max_rows=0,
+            existing_lease_ids=set(),
+        )
+
+        assert len(rows) == 1
+        assert rows[0].lease_id == 123
+        assert rows[0].name == "(tenant lookup failed)"
+
+    async def test_balance_fetch_timeout(self):
+        """Test that balance fetch timeout is enforced."""
+        mock_client = Mock()
+
+        def slow_balance_fetch():
+            time.sleep(0.05)
+            return {}
+
+        mock_client.fetch_outstanding_balances = Mock(side_effect=slow_balance_fetch)
+
+        with pytest.raises(asyncio.TimeoutError):
+            await fetch_active_owed_rows(
+                client=mock_client,
+                bal_timeout=0.01,
+                existing_lease_ids=set(),
+            )
+
+    async def test_tenant_lookup_timeout_creates_placeholder(self):
+        """Test that a tenant lookup timeout does not fail the whole sync."""
+        mock_client = Mock()
+        mock_client.fetch_outstanding_balances = Mock(return_value={123: 500.0})
+        mock_client.list_all_leases = Mock(
+            return_value=[
+                Lease(
+                    id=123,
+                    lease_to_date=None,
+                    unit_number="A1",
+                    tenants=[LeaseTenant(id=456, status="Active")],
+                    current_tenants=[],
+                    unit=Unit(
+                        id=1,
+                        property_id=1,
+                        address=Address(address_line1="123 Main St"),
+                    ),
+                )
+            ]
+        )
+
+        def slow_tenant_fetch(_tenant_id):
+            time.sleep(0.05)
+            return TenantDetails(id=456)
+
+        mock_client.get_tenant_details = Mock(side_effect=slow_tenant_fetch)
+
+        rows, _ = await fetch_active_owed_rows(
+            client=mock_client,
+            tenant_timeout=0.01,
+            tenant_sleep_ms=0,
             existing_lease_ids=set(),
         )
 

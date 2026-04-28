@@ -25,7 +25,7 @@ pip install -e .
 
 # Install collections-sync
 cd ../collections-sync-python
-pip install -e .
+pip install -e ".[dev]"
 ```
 
 ### Configuration
@@ -38,13 +38,14 @@ cp .env.example .env
 ```
 
 Required variables:
-- `BUILDIUM_KEY` — Buildium API client ID
-- `BUILDIUM_SECRET` — Buildium API client secret
+- `BUILDIUM_KEY` — Buildium API client ID (or `BUILDIUM_CLIENT_ID`)
+- `BUILDIUM_SECRET` — Buildium API client secret (or `BUILDIUM_CLIENT_SECRET`)
 - `SHEET_ID` — Google Sheets spreadsheet ID (or `SPREADSHEET_ID`)
 - `WORKSHEET_NAME` — Sheet tab name (or `SHEET_TITLE`)
 
 Optional variables:
 - `TEST_SHEET_ID` — Override `SHEET_ID` for safe testing
+- `BUILDIUM_API_URL` — Buildium API base URL (or `BUILDIUM_BASE_URL`, default `https://api.buildium.com/v1`)
 - `GOOGLE_SHEETS_CREDENTIALS_PATH` — Path to service account JSON (or use ADC)
 - `PORT` — Server port (default 8080)
 - Timeouts and tuning parameters (see `.env.example`)
