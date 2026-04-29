@@ -148,9 +148,23 @@ class CollectionsSheetsWriter:
         read_a1 = f"{self.sheet_title}!A{self.data_row}:{_col_letter(num_cols - 1)}50000"
         existing = self.client.read_range(self.spreadsheet_id, read_a1)
 
+        # Read key column to get accurate row positions (accounts for sparse/empty rows)
+        key_col = _col_letter(key_idx)
+        key_read_a1 = f"{self.sheet_title}!{key_col}{self.data_row}:{key_col}50000"
+        key_col_vals = self.client.read_range(self.spreadsheet_id, key_read_a1)
+
+        # Build accurate key -> row number mapping using key column positions
+        accurate_key_to_row: dict[str, int] = {}
+        for i, key_val in enumerate(key_col_vals):
+            if not key_val:
+                continue
+            k = _normalize_lease_id_key(str(key_val[0]))
+            if k and k not in accurate_key_to_row:
+                accurate_key_to_row[k] = self.data_row + i
+
         # Build map of existing rows by key
         existing_by_key: dict[str, list[Any]] = {}
-        for r in existing:
+        for i, r in enumerate(existing):
             norm_row = list(r) + [None] * (num_cols - len(r))
             norm_row = norm_row[:num_cols]
 
@@ -193,16 +207,6 @@ class CollectionsSheetsWriter:
         sheet_values = to_sheet_values(new_rows)
 
         merged: list[list[Any]] = []
-        key_to_row_num: dict[str, int] = {}
-
-        # Build key->row mapping from existing
-        for i, r in enumerate(existing):
-            sheet_row = self.data_row + i
-            if key_idx < len(r):
-                k = _normalize_lease_id_key(str(r[key_idx]))
-                if k:
-                    if sheet_row > (key_to_row_num.get(k, 0) or self.data_row - 1):
-                        key_to_row_num[k] = sheet_row
 
         # Merge input rows with existing sheet rows
         for input_row, sheet_row in zip(new_rows, sheet_values):
@@ -253,9 +257,9 @@ class CollectionsSheetsWriter:
             if not k:
                 continue
 
-            if k in key_to_row_num:
-                # Update existing row
-                row_num = key_to_row_num[k]
+            if k in accurate_key_to_row:
+                # Update existing row (using accurate row mapping)
+                row_num = accurate_key_to_row[k]
                 a1 = f"{self.sheet_title}!{_col_letter(0)}{row_num}:{_col_letter(num_cols - 1)}{row_num}"
                 update_ranges.append({"range": a1, "values": [out_row]})
             else:
@@ -276,10 +280,10 @@ class CollectionsSheetsWriter:
         # Apply appends
         rows_appended = 0
         if to_append:
-            if not key_to_row_num:
+            if not accurate_key_to_row:
                 start_row = self.data_row
             else:
-                start_row = max(key_to_row_num.values()) + 1
+                start_row = max(accurate_key_to_row.values()) + 1
 
             end_row = start_row + len(to_append) - 1
             append_a1 = f"{self.sheet_title}!{_col_letter(0)}{start_row}:{_col_letter(num_cols - 1)}{end_row}"

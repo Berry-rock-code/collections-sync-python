@@ -376,20 +376,21 @@ async def _run_bulk(
             )
         )
 
+    # Initialize lock manager and validator (used by both paths)
+    lock_mgr = SyncLockManager(
+        client=sheets,
+        spreadsheet_id=cfg.effective_sheet_id,
+        lock_sheet=cfg.sync_lock_sheet,
+        acquire_timeout=float(cfg.sync_lock_timeout_seconds),
+        stale_timeout=float(cfg.sync_lock_stale_seconds),
+    )
+    validator = DataValidator()
+
     # Upsert to sheet
     if cfg.sync_enable_atomic:
         logger.info(
             "Using atomic upsert with locking request_id=%s", request_id
         )
-        lock_mgr = SyncLockManager(
-            client=sheets,
-            spreadsheet_id=cfg.effective_sheet_id,
-            lock_sheet=cfg.sync_lock_sheet,
-            acquire_timeout=float(cfg.sync_lock_timeout_seconds),
-            stale_timeout=float(cfg.sync_lock_stale_seconds),
-        )
-
-        validator = DataValidator()
 
         rows_updated, rows_appended = writer.upsert_preserving_atomic(
             new_rows=rows,
@@ -404,7 +405,7 @@ async def _run_bulk(
         from .transform import HEADERS
 
         # Even without atomic verification, use locking to prevent concurrent conflicts
-        with lock_manager:
+        with lock_mgr:
             rows_updated, rows_appended = writer.upsert_preserving(HEADERS, rows)
 
     logger.info(
