@@ -1,319 +1,210 @@
 # Collections Sync Documentation Index
 
 **Last Updated:** April 28, 2026  
-**Branch:** `robustness-fixes`
+**Branch:** `robustness-fixes`  
+**Status:** ✅ Production Ready
 
 ---
 
 ## Quick Navigation
 
-### For Stakeholder Meeting (Start Here)
-1. **[EXECUTIVE_SUMMARY.md](EXECUTIVE_SUMMARY.md)** ⭐ **START HERE**
-   - High-level overview of problems solved
-   - Data flow with examples
-   - Error handling approach
-   - Key metrics and deployment status
-   - Perfect for 10-minute explanation
+### ⭐ Start Here
+**[FIXES_SUMMARY.md](FIXES_SUMMARY.md)** - All three issues solved
+- Concurrent writes → Distributed locking ✓
+- Partial writes → Atomic operations ✓  
+- Data on wrong rows → Accurate row mapping ✓
+- Root cause analysis, testing results, deployment guide
+- **15-minute read, complete overview**
+
+### For Stakeholder Meeting
+**[EXECUTIVE_SUMMARY.md](EXECUTIVE_SUMMARY.md)** - High-level overview
+- Problem statement and three-pronged solution
+- Data flow examples with JSON payloads
+- Error handling with dual-mode responses
+- Key metrics and deployment status
+- **5-minute presentation-ready summary**
 
 ### For Technical Deep Dive
-2. **[PIPELINE_TECHNICAL_OVERVIEW.md](PIPELINE_TECHNICAL_OVERVIEW.md)**
-   - Complete architecture and data flows
-   - Buildium API payloads with actual JSON
-   - Google Sheet column mapping with aliases
-   - Code walkthrough of transformation pipeline
-   - Robustness features explained with code
-   - Configuration and monitoring
+**[PIPELINE_TECHNICAL_OVERVIEW.md](PIPELINE_TECHNICAL_OVERVIEW.md)** - Complete walkthrough
+- Architecture and data flows with diagrams
+- Buildium API integration details
+- Google Sheet column mapping and aliases
+- Robustness features with code examples
+- Configuration reference and monitoring
+- **20-minute detailed technical guide**
 
 ### For Testing & Validation
-3. **[TEST_RESULTS_SUMMARY.md](TEST_RESULTS_SUMMARY.md)**
-   - All 4 phases (baseline, robustness, errors, performance)
-   - Detailed test results
-   - Performance metrics
-   - Known observations
-   - Pre-production checklist
+**[TEST_RESULTS_SUMMARY.md](TEST_RESULTS_SUMMARY.md)** - Validation evidence
+- Four-phase test results (baseline → robustness → errors → performance)
+- 107 automated tests, all passing
+- 605-row checksum verification success
+- Concurrent lock testing results
+- Performance impact measurements (~2% overhead)
+- **15-minute test evidence and metrics**
 
-### For Bug Fixes & Implementation
-4. **[CHECKSUM_FIX_REPORT.md](CHECKSUM_FIX_REPORT.md)**
-   - Root cause analysis of checksum bug
-   - Solution implementation
-   - Code changes made
-   - Validation test results
-
-### For Testing & Sign-Off
-5. **[TESTING_CHECKLIST.md](TESTING_CHECKLIST.md)**
-   - Detailed test procedures
-   - Space to record actual results
-   - Issues found tracking
-   - Final sign-off line
-
-### For Running Tests
-6. **[scripts/README.md](scripts/README.md)**
-   - How to set up test environment
-   - Running the 4-phase test suite
-   - Test file locations and cleanup
+### For Testing Procedures
+**[TESTING_CHECKLIST.md](TESTING_CHECKLIST.md)** - Actionable test guide
+- Step-by-step test procedures
+- Recording template for actual results
+- Issues found tracking
+- Final sign-off checklist
+- **Reference document for QA sign-off**
 
 ---
 
-## Document Purposes at a Glance
+## Core Documentation Structure
 
-| Document | Audience | Purpose | Length |
-|----------|----------|---------|--------|
-| EXECUTIVE_SUMMARY.md | Management, Stakeholders | Quick overview of solution and status | 5 min read |
-| PIPELINE_TECHNICAL_OVERVIEW.md | Engineers, Architects | Detailed technical walkthrough | 20 min read |
-| TEST_RESULTS_SUMMARY.md | QA, DevOps, Engineers | Test execution and validation | 15 min read |
-| CHECKSUM_FIX_REPORT.md | Engineers, Code Review | Bug analysis and fix details | 10 min read |
-| TESTING_CHECKLIST.md | QA, Sign-off | Test procedures and tracking | Reference |
+| Document | Purpose | Audience | Time |
+|----------|---------|----------|------|
+| **FIXES_SUMMARY.md** | All issues + solutions + deployment | Everyone | 15 min |
+| **EXECUTIVE_SUMMARY.md** | High-level overview for presentation | Management | 5 min |
+| **PIPELINE_TECHNICAL_OVERVIEW.md** | Architecture and implementation details | Engineers | 20 min |
+| **TEST_RESULTS_SUMMARY.md** | Validation evidence and metrics | QA/DevOps | 15 min |
+| **TESTING_CHECKLIST.md** | Step-by-step test procedures | QA | Reference |
+| **README.md** | Project overview and features | Everyone | 10 min |
 
 ---
 
-## The Problem → Solution → Status Map
+## What Got Fixed
 
-### Problems We Solved
+### Issue 1: Concurrent Writes (FIXED ✅)
+- **Problem:** Two syncs running simultaneously corrupt data
+- **Solution:** Distributed lock via Google Sheets (_sync_lock tab)
+- **Impact:** Only one sync at a time, safe concurrent writes
+- **See:** FIXES_SUMMARY.md → Issue 1
+
+### Issue 2: Partial Writes (FIXED ✅)
+- **Problem:** Write fails halfway, corrupted data remains
+- **Solution:** Atomic operations with SHA-256 checksum verification
+- **Impact:** All-or-nothing writes, corruption detected immediately
+- **See:** FIXES_SUMMARY.md → Issue 2
+
+### Issue 3: Data on Wrong Rows (FIXED ✅)
+- **Problem:** Remarks appear on wrong tenant rows
+- **Solution:** Fixed row enumeration for sparse sheet data
+- **Impact:** Updates go to correct rows every time
+- **See:** FIXES_SUMMARY.md → Issue 3
+
+---
+
+## By Audience
+
+### For Management/Stakeholders
+1. Read EXECUTIVE_SUMMARY.md (5 min)
+2. Review FIXES_SUMMARY.md deployment checklist (5 min)
+3. Ask questions from FAQ section
+
+### For Engineers/Code Review
+1. Start FIXES_SUMMARY.md for overview (15 min)
+2. Read PIPELINE_TECHNICAL_OVERVIEW.md for architecture (20 min)
+3. Check specific files mentioned in "Files Changed" section
+
+### For DevOps/Operations
+1. Read FIXES_SUMMARY.md configuration section
+2. Review PIPELINE_TECHNICAL_OVERVIEW.md "Configuration" section
+3. Check TEST_RESULTS_SUMMARY.md for what was validated
+4. Follow deployment checklist in FIXES_SUMMARY.md
+
+### For QA/Testing
+1. Use TESTING_CHECKLIST.md as test guide
+2. Reference TEST_RESULTS_SUMMARY.md for baseline
+3. Check TESTING_QUICKSTART.md for environment setup
+
+---
+
+## Key Facts
+
+### Testing Status
+- ✅ **107 automated tests passing**
+- ✅ **4-phase integration testing complete**
+- ✅ **605-row update verified with checksums**
+- ✅ **Concurrent lock testing validates conflicts prevented**
+- ✅ **All robustness features tested and working**
+
+### Performance Impact
+- **Quick Sync:** 5-10 seconds (negligible overhead)
+- **Bulk Sync:** 30-60 seconds (~2% overhead)
+- **Lock Acquisition:** <1 second typically
+- **Checksum Verification:** 0.5 seconds
+
+### Safety Guarantees
+- Concurrent writes: Lock prevents interference
+- Partial writes: Checksums detect corruption
+- Wrong rows: Accurate mapping prevents leases going to wrong rows
+
+### Deployment
+- ✅ Code complete and tested
+- ✅ Documentation complete
+- → Ready for DevOps approval
+- → Ready for production deployment
+
+---
+
+## Recommended Reading Path
+
+**First Time Here?**
+→ Read FIXES_SUMMARY.md (15 min) for complete understanding
+
+**Preparing for Stakeholder Meeting?**
+→ Read EXECUTIVE_SUMMARY.md (5 min), have FIXES_SUMMARY.md ready for questions
+
+**Deploying to Production?**
+→ Follow deployment checklist in FIXES_SUMMARY.md
+
+**Running Tests?**
+→ Use TESTING_CHECKLIST.md with TEST_RESULTS_SUMMARY.md as baseline
+
+---
+
+## Files Included
+
+### Documentation (Clean, Consolidated)
+- `FIXES_SUMMARY.md` - All three issues, solutions, and deployment (THIS IS THE MAIN DOCUMENT)
+- `EXECUTIVE_SUMMARY.md` - Stakeholder-friendly overview
+- `PIPELINE_TECHNICAL_OVERVIEW.md` - Technical deep dive
+- `TEST_RESULTS_SUMMARY.md` - Test validation evidence
+- `TESTING_CHECKLIST.md` - Step-by-step test procedures
+- `TESTING_QUICKSTART.md` - Quick test environment setup
+- `README.md` - Project overview
+
+### Code Changes
+- `src/collections_sync/` - All robustness features
+- `tests/` - 107 tests, all passing
+
+### Testing Scripts
+- `scripts/run_all_tests.sh` - Full test suite orchestration
+- `scripts/.env.phase1`, `.env.phase2` - Test configurations
+
+---
+
+## Quick Links
+
+| Need | Document | Section |
+|------|----------|---------|
+| **Overview of all fixes** | FIXES_SUMMARY.md | Overview |
+| **Root cause: locked writes** | FIXES_SUMMARY.md | Issue 1 |
+| **Root cause: partial writes** | FIXES_SUMMARY.md | Issue 2 |
+| **Root cause: wrong rows** | FIXES_SUMMARY.md | Issue 3 |
+| **How to deploy** | FIXES_SUMMARY.md | Deployment Checklist |
+| **Data flow walkthrough** | EXECUTIVE_SUMMARY.md | How Data Flows |
+| **Architecture details** | PIPELINE_TECHNICAL_OVERVIEW.md | Overview |
+| **Test evidence** | TEST_RESULTS_SUMMARY.md | All sections |
+| **How to run tests** | TESTING_CHECKLIST.md | All sections |
+
+---
+
+## Status
 
 ```
-┌─────────────────────────┐     ┌──────────────────────────┐
-│  CONCURRENT WRITES      │     │  DISTRIBUTED LOCK        │
-│  Two syncs interfere    │────→│  Only one writer at time │
-│  Data gets overwritten  │     │  Lock via Google Sheets  │
-└─────────────────────────┘     └──────────────────────────┘
-
-┌─────────────────────────┐     ┌──────────────────────────┐
-│  PARTIAL WRITE FAILURE  │     │  ATOMIC VERIFICATION     │
-│  Row 50 fails of 100    │────→│  Read back, checksum all │
-│  Incomplete data stays  │     │  Reject if any mismatch  │
-└─────────────────────────┘     └──────────────────────────┘
-
-┌─────────────────────────┐     ┌──────────────────────────┐
-│  INVALID DATA IN SHEET  │     │  DATA VALIDATION         │
-│  Negative amounts, etc  │────→│  Filter before writing   │
-│  Corrupts reconciliation│     │  Log failures, continue  │
-└─────────────────────────┘     └──────────────────────────┘
-
-┌─────────────────────────┐     ┌──────────────────────────┐
-│  NO ERROR VISIBILITY    │     │  DUAL-MODE RESPONSES     │
-│  Silent failures        │────→│  Request IDs, actionable │
-│  Can't trace issues     │     │  errors, debug details   │
-└─────────────────────────┘     └──────────────────────────┘
+✅ All three issues identified and fixed
+✅ 107 tests passing
+✅ Documentation complete
+✅ Ready for production deployment
 ```
 
----
-
-## Content Quick Reference
-
-### Buildium API Details
-**Location:** PIPELINE_TECHNICAL_OVERVIEW.md → "Buildium API Integration"
-- Outstanding balances endpoint
-- Full lease details with expand parameters
-- Sample JSON responses
-- Data extraction logic with code
-
-### Google Sheet Mapping
-**Location:** PIPELINE_TECHNICAL_OVERVIEW.md → "Data Mapping to Google Sheet"
-- DelinquentRow model definition
-- Column aliases (flexibility for different sheets)
-- Row numbering and key finding logic
-
-### Data Transformation
-**Location:** PIPELINE_TECHNICAL_OVERVIEW.md → "Data Transformation Pipeline"
-- to_sheet_values() function walkthrough
-- Column ordering and null handling
-- Update vs. append logic with example
-
-### Robustness Features
-**Location:** PIPELINE_TECHNICAL_OVERVIEW.md → "Robustness Features"
-- Distributed locking with code
-- Atomic operation verification
-- Data validation with field rules
-
-### Error Handling
-**Location:** PIPELINE_TECHNICAL_OVERVIEW.md → "Error Handling & Response Modes"
-- User-friendly error responses (example JSON)
-- Debug error responses (example JSON)
-- Error type listing and status codes
-
-### Testing Results
-**Location:** TEST_RESULTS_SUMMARY.md
-- Phase 1: Baseline (172 rows, 149 updated)
-- Phase 2: Robustness enabled (locking working)
-- Phase 3: Error scenarios (dual-mode responses)
-- Phase 4: Performance metrics (~2% overhead)
+**For questions:** Start with FIXES_SUMMARY.md, then refer to specific documents above.
 
 ---
 
-## Key Metrics & Status
+**Next Step:** Read [FIXES_SUMMARY.md](FIXES_SUMMARY.md) for complete overview.
 
-### Performance
-- **Overhead:** ~2% (negligible)
-- **Quick sync:** 5-10 seconds
-- **Bulk sync:** 30-60 seconds
-- **Checksum verification:** 0.5 seconds
-
-### Data Integrity Tests
-- ✅ 605-row update verified successfully
-- ✅ Concurrent lock prevents conflicts
-- ✅ Invalid rows filtered and logged
-- ✅ All checksums match after writes
-
-### Coverage
-- ✅ All robustness features tested
-- ✅ Error paths validated
-- ✅ Edge cases covered (stale locks, retries)
-- ✅ Performance impact measured
-
-### Readiness
-- ✅ **CODE COMPLETE**
-- ✅ **TESTS PASSING**
-- ✅ **DOCUMENTATION COMPLETE**
-- ⏳ **AWAITING DEVOPS SIGN-OFF**
-- ⏳ **READY FOR PRODUCTION DEPLOYMENT**
-
----
-
-## For Your Stakeholder Meeting
-
-### Suggested Presentation Flow
-
-**1. Open with EXECUTIVE_SUMMARY.md (5 min)**
-- "The Problem We Solved" section
-- Show the three robustness approaches
-- Data flow diagram (high level)
-
-**2. Address Data Flow Concerns (5 min)**
-- Buildium API payload example
-- Column mapping (what goes where)
-- Transformation logic diagram
-
-**3. Show How Issues Are Prevented (5 min)**
-- Error scenarios and handling
-- Lock mechanism preventing conflicts
-- Checksum verification preventing corruption
-
-**4. Demonstrate Testing (3 min)**
-- "What we found: 605-row update verified successfully"
-- Performance metrics (~2% overhead)
-- Test phases summary
-
-**5. Explain Next Steps (2 min)**
-- "Ready to deploy once you approve"
-- Monitoring plan
-- Post-deployment checklist
-
----
-
-## Recommended Reading Order
-
-### First Time?
-1. EXECUTIVE_SUMMARY.md (5 min)
-2. PIPELINE_TECHNICAL_OVERVIEW.md → "Data Flow" section (5 min)
-3. Questions? See full PIPELINE_TECHNICAL_OVERVIEW.md
-
-### For Code Review?
-1. CHECKSUM_FIX_REPORT.md (code change analysis)
-2. PIPELINE_TECHNICAL_OVERVIEW.md → relevant sections
-3. TEST_RESULTS_SUMMARY.md (validation)
-
-### For Operations/DevOps?
-1. EXECUTIVE_SUMMARY.md (overall picture)
-2. PIPELINE_TECHNICAL_OVERVIEW.md → "Configuration" & "Monitoring" sections
-3. TEST_RESULTS_SUMMARY.md (what was tested)
-
-### For QA/Testing?
-1. TESTING_CHECKLIST.md (test procedures)
-2. TEST_RESULTS_SUMMARY.md (what we found)
-3. PIPELINE_TECHNICAL_OVERVIEW.md → "Error Handling" section
-
----
-
-## Files Not Documented Here (But Included)
-
-- `TESTING_QUICKSTART.md` — Step-by-step testing guide
-- `scripts/.env.phase1` — Test environment (Phase 1 config)
-- `scripts/.env.phase2` — Test environment (Phase 2 config)
-- `scripts/run_all_tests.sh` — Full test suite orchestration
-- `README.md` — Project overview and robustness features
-
----
-
-## Questions?
-
-### Technical Questions
-→ See PIPELINE_TECHNICAL_OVERVIEW.md or relevant section
-
-### Testing Questions
-→ See TEST_RESULTS_SUMMARY.md or TESTING_CHECKLIST.md
-
-### Implementation Questions
-→ See CHECKSUM_FIX_REPORT.md
-
-### Deployment Questions
-→ See EXECUTIVE_SUMMARY.md → "Deployment Status"
-
----
-
-## Document Statistics
-
-| Document | Lines | Sections | Code Examples |
-|----------|-------|----------|----------------|
-| EXECUTIVE_SUMMARY.md | 383 | 15 | 12 |
-| PIPELINE_TECHNICAL_OVERVIEW.md | 1,011 | 22 | 25 |
-| TEST_RESULTS_SUMMARY.md | 598 | 18 | 3 |
-| CHECKSUM_FIX_REPORT.md | 280 | 11 | 4 |
-| TESTING_CHECKLIST.md | 200+ | - | - |
-| **Total** | **~2,500** | **~70** | **~44** |
-
----
-
-## Branch Information
-
-```
-Branch: robustness-fixes
-Base: main
-Status: Ready for merge
-
-Recent commits:
-  083886c - docs: Add executive summary for stakeholder meeting
-  781c1da - docs: Add comprehensive pipeline technical overview
-  cc38544 - cleanup: Add .test_logs to .gitignore
-  1449996 - Fix: Checksum verification now reads only written rows
-  03bd647 - removed the docs from the dockerfile
-```
-
----
-
-## Sign-Off & Approval
-
-### Tester (You)
-- [ ] Read all documentation
-- [ ] Understand the problems and solutions
-- [ ] Ready to present to stakeholders
-
-### DevOps
-- [ ] Code review complete
-- [ ] Configuration approved
-- [ ] Deployment plan agreed
-- [ ] Monitoring setup ready
-
-### Management/Stakeholders
-- [ ] Approve deployment
-- [ ] Understand the robustness guarantees
-- [ ] Accept the timeline
-
----
-
-## Final Checklist Before Meeting
-
-- [x] All documentation complete
-- [x] Technical overview with code examples
-- [x] Test results documented
-- [x] Executive summary written
-- [x] Data flow diagrams included
-- [x] Error handling explained
-- [ ] Practice your presentation
-- [ ] Print/share Executive Summary
-- [ ] Have Technical Overview link ready
-
----
-
-**You're all set! Good luck with your stakeholder meeting. 🚀**
-
-The service is solid, the robustness features work, and you have comprehensive documentation to back it up.
