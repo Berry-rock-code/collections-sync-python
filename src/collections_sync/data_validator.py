@@ -113,6 +113,25 @@ class DataValidator:
         expected_checksum = DataValidator.compute_checksum(expected_values)
         actual_checksum = DataValidator.compute_checksum(actual_values)
 
+        # Debug logging: log the actual data for analysis
+        logger.debug(f"Checksum verification: expected={expected_checksum}")
+        logger.debug(f"Checksum verification: actual={actual_checksum}")
+        logger.debug(f"Expected data (first 3 rows): {expected_values[:3]}")
+        logger.debug(f"Actual data (first 3 rows): {actual_values[:3]}")
+
+        # Log row-by-row diff for first few rows
+        if expected_values and actual_values:
+            for i in range(min(3, len(expected_values), len(actual_values))):
+                if i < len(expected_values) and i < len(actual_values):
+                    exp_row = expected_values[i]
+                    act_row = actual_values[i]
+                    if exp_row != act_row:
+                        logger.debug(
+                            f"Row {i} differs:\n"
+                            f"  Expected: {exp_row}\n"
+                            f"  Actual:   {act_row}"
+                        )
+
         if expected_checksum != actual_checksum:
             raise DataCorruptionError(
                 f"Checksum mismatch after write! "

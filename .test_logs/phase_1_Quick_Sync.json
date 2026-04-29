@@ -1,0 +1,10 @@
+{
+  "mode": "quick",
+  "existing_keys": 178,
+  "rows_prepared": 0,
+  "rows_updated": 152,
+  "rows_appended": 0,
+  "leases_scanned": 0,
+  "failed_enrichments": 0,
+  "request_id": "47c22441-102b-41ae-93a5-97b36e19be8c"
+}

@@ -570,24 +570,31 @@ class CollectionsSheetsWriter:
         # Step 9: Verify writes if enabled
         if verify_checksums and validator and expected_written_values:
             logger.info("Verifying writes...")
-            # Re-read the written rows
+            # Re-read only the rows we wrote (updates + appends)
+            actual_written = []
+
+            # Read back updated rows
             if update_ranges:
-                verify_a1 = f"{self.sheet_title}!A{self.data_row}:{_col_letter(num_cols - 1)}50000"
-            else:
-                # Only appends, re-read from new rows only
-                start_row = (
-                    self.data_row
-                    if not key_to_row_num
-                    else max(key_to_row_num.values()) + 1
-                )
+                for update in update_ranges:
+                    verify_a1 = update["range"]
+                    rows = self.client.read_range(self.spreadsheet_id, verify_a1)
+                    actual_written.extend(rows)
+
+            # Read back appended rows
+            if to_append:
+                if not key_to_row_num:
+                    start_row = self.data_row
+                else:
+                    start_row = max(key_to_row_num.values()) + 1
+
+                end_row = start_row + len(to_append) - 1
                 verify_a1 = (
                     f"{self.sheet_title}!A{start_row}:"
-                    f"{_col_letter(num_cols - 1)}{start_row + len(to_append)}"
+                    f"{_col_letter(num_cols - 1)}{end_row}"
                 )
+                rows = self.client.read_range(self.spreadsheet_id, verify_a1)
+                actual_written.extend(rows)
 
-            actual_written = self.client.read_range(
-                self.spreadsheet_id, verify_a1
-            )
             validator.verify_write(expected_written_values, actual_written)
             logger.info("✓ Checksum verification passed")
 

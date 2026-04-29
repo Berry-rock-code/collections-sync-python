@@ -1,0 +1,10 @@
+{
+  "mode": "bulk",
+  "existing_keys": 178,
+  "rows_prepared": 0,
+  "rows_updated": 0,
+  "rows_appended": 0,
+  "leases_scanned": 1000,
+  "failed_enrichments": 0,
+  "request_id": "349f39ba-ee7f-4c3b-bfad-f5e456ece5bb"
+}

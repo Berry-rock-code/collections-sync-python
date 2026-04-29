@@ -1,0 +1,16 @@
+{
+  "detail": [
+    {
+      "type": "enum",
+      "loc": [
+        "body",
+        "mode"
+      ],
+      "msg": "Input should be 'bulk' or 'quick'",
+      "input": "invalid",
+      "ctx": {
+        "expected": "'bulk' or 'quick'"
+      }
+    }
+  ]
+}
