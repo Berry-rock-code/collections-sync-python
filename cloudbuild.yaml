@@ -18,22 +18,9 @@ steps:
       - 'push'
       - 'gcr.io/${PROJECT_ID}/collections-sync:${SHORT_SHA}'
 
-  # Deploy to Cloud Run
-  - name: 'gcr.io/cloud-builders/gke-deploy'
-    args:
-      - run
-      - '--filename=collections-sync/k8s/'
-      - '--image=gcr.io/${PROJECT_ID}/collections-sync:${SHORT_SHA}'
-      - '--location=${_REGION}'
-
-# Alternative: Direct Cloud Run deployment (simpler)
-# - name: 'gcr.io/cloud-builders/run'
-#   args:
-#     - deploy
-#     - collections-sync
-#     - '--image=gcr.io/${PROJECT_ID}/collections-sync:${SHORT_SHA}'
-#     - '--region=${_REGION}'
-#     - '--platform=managed'
+# Deployment is handled by deploy.sh after this build completes. Keeping this
+# file build-only avoids referencing Kubernetes manifests this repo does not
+# contain.
 
 images:
   - 'gcr.io/${PROJECT_ID}/collections-sync:${SHORT_SHA}'

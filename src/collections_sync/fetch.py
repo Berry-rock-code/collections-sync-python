@@ -5,6 +5,7 @@ from datetime import datetime
 
 from core_integrations.buildium import BuildiumClient, Lease, TenantDetails
 
+from .async_utils import run_sync_with_timeout
 from .models import DelinquentRow
 
 logger = logging.getLogger(__name__)
@@ -46,15 +47,18 @@ async def fetch_active_owed_rows(
 
     # Step A: Fetch outstanding balances
     logger.info("Fetching outstanding balances...")
-    debt_map: dict[int, float] = await asyncio.to_thread(
-        client.fetch_outstanding_balances
+    debt_map: dict[int, float] = await run_sync_with_timeout(
+        client.fetch_outstanding_balances,
+        timeout=bal_timeout,
     )
     logger.info("Found %d leases with outstanding balances", len(debt_map))
 
     # Step B: Fetch all leases
     logger.info("Fetching leases...")
-    leases: list[Lease] = await asyncio.to_thread(
-        lambda: client.list_all_leases(max_pages=max_pages)
+    leases: list[Lease] = await run_sync_with_timeout(
+        client.list_all_leases,
+        max_pages=max_pages,
+        timeout=lease_timeout,
     )
     logger.info("Fetched %d total leases", len(leases))
 
@@ -64,6 +68,8 @@ async def fetch_active_owed_rows(
     cache_lock = asyncio.Lock()
     results: list[DelinquentRow] = []
     results_lock = asyncio.Lock()
+    failed_leases: list[int] = []
+    failed_lock = asyncio.Lock()
 
     today = datetime.now().strftime("%m/%d/%Y")
 
@@ -103,9 +109,20 @@ async def fetch_active_owed_rows(
                 await asyncio.sleep(tenant_sleep_ms / 1000.0)
 
                 try:
-                    td = await asyncio.to_thread(
-                        client.get_tenant_details, tenant_id
+                    td = await run_sync_with_timeout(
+                        client.get_tenant_details,
+                        tenant_id,
+                        timeout=tenant_timeout,
                     )
+                except asyncio.CancelledError:
+                    logger.warning(
+                        "tenant lookup cancelled lease_id=%d tenant_id=%d",
+                        lease.id,
+                        tenant_id,
+                    )
+                    async with failed_lock:
+                        failed_leases.append(lease.id)
+                    raise
                 except Exception as e:
                     logger.warning(
                         "tenant lookup failed leaseID=%d tenantID=%d: %s",
@@ -167,7 +184,15 @@ async def fetch_active_owed_rows(
         tasks.append(asyncio.create_task(enrich_lease(lease, owed)))
 
     # Wait for all tasks to complete
-    await asyncio.gather(*tasks)
+    await asyncio.gather(*tasks, return_exceptions=False)
+
+    # Log any failed enrichments
+    if failed_leases:
+        logger.warning(
+            "Tenant enrichment failed for %d leases: %s",
+            len(failed_leases),
+            failed_leases[:10],
+        )
 
     # Sort by amount owed descending
     results.sort(key=lambda r: r.amount_owed, reverse=True)

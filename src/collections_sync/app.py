@@ -2,21 +2,78 @@
 import json
 import logging
 import os
+import sys
 import tempfile
+import traceback
+import uuid
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from core_integrations.buildium import BuildiumClient, BuildiumConfig
 from core_integrations.google_sheets import GoogleSheetsClient, GoogleSheetsConfig
 
+from .async_utils import run_sync_with_timeout
 from .config import CollectionsSyncConfig
+from .data_validator import DataValidator
+from .exceptions import DataCorruptionError, DataValidationError, LockTimeoutError
 from .fetch import fetch_active_owed_rows
+from .lock_manager import SyncLockManager
 from .models import SyncMode, SyncRequest, SyncResult
 from .sheets_writer import CollectionsSheetsWriter
 
 logger = logging.getLogger(__name__)
+
+
+def _error_response(
+    error_type: str,
+    request_id: str,
+    message: str,
+    status_code: int,
+    debug: bool = False,
+    exception: Exception = None,
+    user_actions: list[str] = None,
+    technical_info: dict = None,
+) -> dict:
+    """Format error response based on debug mode.
+
+    Args:
+        error_type: Error type (e.g., "DataCorruptionError")
+        request_id: Request ID for tracing
+        message: Error message
+        status_code: HTTP status code
+        debug: If True, include full technical details and stack trace
+        exception: The original exception (for stack trace)
+        user_actions: List of actions for non-technical users
+        technical_info: Dict of technical details
+
+    Returns:
+        Error detail dict for HTTPException
+    """
+    if debug:
+        # Full technical response
+        response = {
+            "error_type": error_type,
+            "request_id": request_id,
+            "http_status": status_code,
+            "message": message,
+            "exception_type": type(exception).__name__ if exception else None,
+            "stack_trace": traceback.format_exc() if exception else None,
+            "technical_info": technical_info or {},
+        }
+    else:
+        # User-friendly response
+        response = {
+            "error_type": error_type,
+            "request_id": request_id,
+            "message": message,
+            "actions": user_actions or ["Contact support with request_id"],
+        }
+        if technical_info:
+            response["technical_info"] = technical_info
+
+    return response
 
 
 @asynccontextmanager
@@ -97,27 +154,168 @@ async def health() -> dict:
 
 
 @app.post("/")
-async def trigger_sync(request: SyncRequest) -> dict:
+async def trigger_sync(request: SyncRequest, debug: bool = Query(False)) -> dict:
     """Trigger synchronization.
 
     Args:
         request: SyncRequest with mode, max_pages, max_rows.
+        debug: If True, return full technical error details with stack traces.
 
     Returns:
-        SyncResult as JSON.
+        SyncResult as JSON with request_id for tracing.
+
+    Usage:
+        POST / ?mode=bulk               → User-friendly errors
+        POST / ?mode=bulk&debug=true    → Full technical errors with stack traces
     """
     cfg = app.state.cfg
     buildium = app.state.buildium
     sheets = app.state.sheets
 
+    request_id = str(uuid.uuid4())
+    logger.info("Sync requested request_id=%s mode=%s debug=%s", request_id, request.mode, debug)
+
     try:
         if request.mode == SyncMode.BULK:
-            return await _run_bulk(cfg, buildium, sheets, request)
+            result = await _run_bulk(cfg, buildium, sheets, request, request_id)
         else:
-            return await _run_quick(cfg, buildium, sheets, request)
+            result = await _run_quick(cfg, buildium, sheets, request, request_id)
+
+        result["request_id"] = request_id
+        return result
+
+    except LockTimeoutError as e:
+        logger.warning("Lock timeout request_id=%s: %s", request_id, e)
+        raise HTTPException(
+            status_code=503,
+            detail=_error_response(
+                error_type="LockTimeoutError",
+                request_id=request_id,
+                message=str(e),
+                status_code=503,
+                debug=debug,
+                exception=e,
+                user_actions=[
+                    "1. Wait 30-60 seconds and retry",
+                    "2. If persistent, contact support with request_id",
+                ],
+                technical_info={
+                    "reason": "Another sync is currently in progress (lock held for > 30 seconds)",
+                    "lock_sheet": cfg.sync_lock_sheet,
+                    "lock_timeout_seconds": cfg.sync_lock_timeout_seconds,
+                    "lock_stale_seconds": cfg.sync_lock_stale_seconds,
+                    "spreadsheet_id": cfg.effective_sheet_id,
+                },
+            ),
+        )
+    except DataValidationError as e:
+        logger.error("Data validation error request_id=%s: %s", request_id, e)
+        raise HTTPException(
+            status_code=422,
+            detail=_error_response(
+                error_type="DataValidationError",
+                request_id=request_id,
+                message=str(e),
+                status_code=422,
+                debug=debug,
+                exception=e,
+                user_actions=[
+                    "1. Some rows from Buildium have data quality issues",
+                    "2. Invalid rows are automatically filtered out",
+                    "3. Contact DevOps if this happens frequently",
+                ],
+                technical_info={
+                    "reason": "Some rows failed validation (negative amounts, invalid dates, etc.)",
+                    "validation_error_details": str(e),
+                    "note": "Invalid rows are filtered out. Sync continues with valid data only.",
+                    "common_issues": [
+                        "lease_id <= 0",
+                        "amount_owed < 0",
+                        "empty name field",
+                        "date_added not matching MM/DD/YYYY",
+                    ],
+                },
+            ),
+        )
+    except DataCorruptionError as e:
+        logger.error(
+            "Data corruption detected request_id=%s: %s",
+            request_id,
+            e,
+            exc_info=True,
+        )
+        sheet_url = f"https://docs.google.com/spreadsheets/d/{cfg.effective_sheet_id}/edit"
+        raise HTTPException(
+            status_code=500,
+            detail=_error_response(
+                error_type="DataCorruptionError",
+                request_id=request_id,
+                message=str(e),
+                status_code=500,
+                debug=debug,
+                exception=e,
+                user_actions=[
+                    f"1. Open sheet: {sheet_url}",
+                    f"2. Check tab '{cfg.worksheet_name}' for incomplete rows",
+                    "3. Look for rows with missing data in any columns",
+                    "4. Save a backup (File → Version history)",
+                    "5. Manually fix incomplete rows",
+                    f"6. Contact support with request_id={request_id}",
+                ],
+                technical_info={
+                    "sheet_id": cfg.effective_sheet_id,
+                    "worksheet": cfg.worksheet_name,
+                    "error_message": str(e),
+                    "cause": "Post-write checksum verification failed - expected != actual",
+                    "severity": "CRITICAL - requires manual intervention",
+                    "what_happened": [
+                        "1. Rows were written to Google Sheets",
+                        "2. Service read back the written data",
+                        "3. Checksum comparison failed (data was corrupted or modified)",
+                        "4. Sheet may be partially written or have incorrect values",
+                    ],
+                    "notes": [
+                        "NO RETRY performed (sheet state unknown)",
+                        "Manual inspection required before retry",
+                        "Check Google Sheets Activity log for any concurrent writes",
+                        "Verify Buildium API and Google Sheets quota are healthy",
+                    ],
+                    "docs": "See docs/ROBUSTNESS_FEATURES.md#step-9-verify-post-write-state",
+                },
+            ),
+        )
     except Exception as e:
-        logger.error("Sync failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Unexpected error request_id=%s: %s", request_id, e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=_error_response(
+                error_type="InternalError",
+                request_id=request_id,
+                message=str(e),
+                status_code=500,
+                debug=debug,
+                exception=e,
+                user_actions=[
+                    f"1. Note this request_id: {request_id}",
+                    "2. Check if Buildium or Google Sheets are down",
+                    "3. Try again in 30 seconds",
+                    "4. If problem persists, contact DevOps",
+                ],
+                technical_info={
+                    "exception_type": type(e).__name__,
+                    "error_message": str(e),
+                    "spreadsheet_id": cfg.effective_sheet_id,
+                    "worksheet": cfg.worksheet_name,
+                    "troubleshooting": [
+                        "1. Check Buildium API status",
+                        "2. Check Google Sheets quota and rate limits",
+                        "3. Check service credentials (GCP IAM, API keys)",
+                        "4. Review timeout settings (BAL_TIMEOUT, LEASE_TIMEOUT, TENANT_TIMEOUT)",
+                        "5. Check network connectivity to both APIs",
+                    ],
+                },
+            ),
+        )
 
 
 async def _run_bulk(
@@ -125,9 +323,15 @@ async def _run_bulk(
     buildium: BuildiumClient,
     sheets: GoogleSheetsClient,
     request: SyncRequest,
+    request_id: str,
 ) -> dict:
     """Execute bulk sync mode."""
-    logger.info("Starting bulk sync: max_pages=%d, max_rows=%d", request.max_pages, request.max_rows)
+    logger.info(
+        "Starting bulk sync request_id=%s: max_pages=%d, max_rows=%d",
+        request_id,
+        request.max_pages,
+        request.max_rows,
+    )
 
     writer = CollectionsSheetsWriter(
         client=sheets,
@@ -163,31 +367,63 @@ async def _run_bulk(
 
     if not rows:
         logger.info("No rows to sync")
-        return asdict(SyncResult(
-            mode=request.mode.value,
-            existing_keys=len(existing_lease_ids),
-            rows_prepared=0,
-            leases_scanned=leases_scanned,
-        ))
+        return asdict(
+            SyncResult(
+                mode=request.mode.value,
+                existing_keys=len(existing_lease_ids),
+                rows_prepared=0,
+                leases_scanned=leases_scanned,
+            )
+        )
 
     # Upsert to sheet
-    from .transform import HEADERS
-    rows_updated, rows_appended = writer.upsert_preserving(HEADERS, rows)
+    if cfg.sync_enable_atomic:
+        logger.info(
+            "Using atomic upsert with locking request_id=%s", request_id
+        )
+        lock_mgr = SyncLockManager(
+            client=sheets,
+            spreadsheet_id=cfg.effective_sheet_id,
+            lock_sheet=cfg.sync_lock_sheet,
+            acquire_timeout=float(cfg.sync_lock_timeout_seconds),
+            stale_timeout=float(cfg.sync_lock_stale_seconds),
+        )
+
+        validator = DataValidator()
+
+        rows_updated, rows_appended = writer.upsert_preserving_atomic(
+            new_rows=rows,
+            lock_manager=lock_mgr,
+            validator=validator,
+            verify_checksums=cfg.sync_verify_checksums,
+            max_retries=cfg.sync_max_retries,
+            retry_backoff_ms=cfg.sync_retry_backoff_ms,
+        )
+    else:
+        logger.info("Using legacy upsert (atomic disabled) request_id=%s", request_id)
+        from .transform import HEADERS
+
+        # Even without atomic verification, use locking to prevent concurrent conflicts
+        with lock_manager:
+            rows_updated, rows_appended = writer.upsert_preserving(HEADERS, rows)
 
     logger.info(
-        "Upsert complete: %d updated, %d appended",
+        "Upsert complete request_id=%s: %d updated, %d appended",
+        request_id,
         rows_updated,
         rows_appended,
     )
 
-    return asdict(SyncResult(
-        mode=request.mode.value,
-        existing_keys=len(existing_lease_ids),
-        rows_prepared=len(rows),
-        rows_updated=rows_updated,
-        rows_appended=rows_appended,
-        leases_scanned=leases_scanned,
-    ))
+    return asdict(
+        SyncResult(
+            mode=request.mode.value,
+            existing_keys=len(existing_lease_ids),
+            rows_prepared=len(rows),
+            rows_updated=rows_updated,
+            rows_appended=rows_appended,
+            leases_scanned=leases_scanned,
+        )
+    )
 
 
 async def _run_quick(
@@ -195,9 +431,10 @@ async def _run_quick(
     buildium: BuildiumClient,
     sheets: GoogleSheetsClient,
     request: SyncRequest,
+    request_id: str,
 ) -> dict:
     """Execute quick sync mode (balance-only updates)."""
-    logger.info("Starting quick sync")
+    logger.info("Starting quick sync request_id=%s", request_id)
 
     writer = CollectionsSheetsWriter(
         client=sheets,
@@ -250,8 +487,7 @@ async def _fetch_balances(client: BuildiumClient, lease_ids: list[int]) -> dict[
     Returns:
         Map of lease_id -> balance.
     """
-    def _do_fetch():
-        return client.fetch_outstanding_balances_for_lease_ids(lease_ids)
-
-    import asyncio
-    return await asyncio.to_thread(_do_fetch)
+    return await run_sync_with_timeout(
+        client.fetch_outstanding_balances_for_lease_ids,
+        lease_ids,
+    )

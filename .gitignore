@@ -73,3 +73,5 @@ logs/
 auth/
 /auth/
 **/auth/**
+.codex
+.test_logs/

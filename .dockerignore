@@ -16,3 +16,4 @@ build
 .github
 tests
 .DS_Store
+docs/

@@ -33,6 +33,7 @@ class SyncResult:
     rows_updated: int = 0
     rows_appended: int = 0
     leases_scanned: int = 0
+    failed_enrichments: int = 0
 
 
 class SyncRequest(BaseModel):

@@ -366,6 +366,33 @@ class TestCollectionsSheetsWriterQuickUpdate:
         assert isinstance(call_args[0][1], list)  # updates list
         assert len(call_args[0][1]) == 4  # 2 leases * 2 cols each
 
+    def test_quick_update_skips_missing_balances(self):
+        """Test quick update leaves rows alone when Buildium omits their balance."""
+        mock_client = Mock()
+        writer = CollectionsSheetsWriter(
+            client=mock_client,
+            spreadsheet_id="abc123",
+            sheet_title="Sheet1",
+            header_row=1,
+            data_row=2,
+        )
+
+        headers = ["Lease ID", "Amount Owed:", "Last Edited Date"]
+        key_to_row = {"123": 2, "456": 3, "bad-id": 4}
+        balances = {123: 0.0}
+
+        mock_client.batch_update_values = Mock()
+
+        result = writer.quick_update_balances(key_to_row, headers, balances)
+
+        assert result == 1
+        mock_client.batch_update_values.assert_called_once()
+
+        updates = mock_client.batch_update_values.call_args[0][1]
+        assert len(updates) == 2
+        assert updates[0]["range"] == "Sheet1!B2"
+        assert updates[0]["values"] == [[0.0]]
+
 
 class TestCollectionsSheetsWriterDatePreservation:
     """Test that Date First Added is preserved correctly."""
