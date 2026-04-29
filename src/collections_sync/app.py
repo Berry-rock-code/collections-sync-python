@@ -403,7 +403,9 @@ async def _run_bulk(
         logger.info("Using legacy upsert (atomic disabled) request_id=%s", request_id)
         from .transform import HEADERS
 
-        rows_updated, rows_appended = writer.upsert_preserving(HEADERS, rows)
+        # Even without atomic verification, use locking to prevent concurrent conflicts
+        with lock_manager:
+            rows_updated, rows_appended = writer.upsert_preserving(HEADERS, rows)
 
     logger.info(
         "Upsert complete request_id=%s: %d updated, %d appended",
