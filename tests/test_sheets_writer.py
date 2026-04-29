@@ -405,6 +405,8 @@ class TestCollectionsSheetsWriterDatePreservation:
             side_effect=[
                 # Header row (all OWNED_HEADERS required)
                 [["Date First Added", "Name", "Address:", "Phone Number", "Email", "Amount Owed:", "Lease ID", "Last Edited Date"]],
+                # Key column read (Lease ID column) - new read_range call from row enumeration fix
+                [[123]],
                 # Existing data row: has a value in Date First Added
                 [["01/01/2020", "Old Name", "123 Main St", "555-1234", "old@test.com", 1000.0, 123, "04/20/2026"]],
             ]
